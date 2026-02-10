@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Bangkok, Thailand Preview</title>
+  <desc id="desc">Placeholder preview image for Bangkok, Thailand trip memories.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="45%" stop-color="#1f2937"/>
+      <stop offset="100%" stop-color="#374151"/>
+    </linearGradient>
+    <pattern id="grain" width="8" height="8" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.7" fill="rgba(255,255,255,0.2)"/>
+      <circle cx="5" cy="3" r="0.6" fill="rgba(255,255,255,0.15)"/>
+      <circle cx="7" cy="7" r="0.5" fill="rgba(255,255,255,0.12)"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="800" fill="url(#bg)"/>
+  <rect width="1200" height="800" fill="url(#grain)" opacity="0.6"/>
+  <rect x="64" y="64" width="1072" height="672" rx="40" fill="none" stroke="#FFD700" stroke-width="3" opacity="0.8"/>
+  <text x="600" y="360" text-anchor="middle" fill="#f9fafb" font-family="'Segoe UI', Arial, sans-serif" font-size="72" font-weight="700">Bangkok, Thailand</text>
+  <text x="600" y="430" text-anchor="middle" fill="#FFD700" font-family="'Segoe UI', Arial, sans-serif" font-size="34" letter-spacing="4">MEMORY LANE</text>
+</svg>
