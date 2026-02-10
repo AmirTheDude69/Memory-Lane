@@ -124,3 +124,29 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Fullscreen overrides for the imported Framer FF Map component */
+.memory-lane-framer-map.framer-JY1LS.framer-1ng6z98 {
+  gap: 0 !important;
+  height: 100vh !important;
+  inset: 0;
+  justify-content: stretch !important;
+  left: 0;
+  position: absolute !important;
+  top: 0;
+  width: 100vw !important;
+}
+
+.memory-lane-framer-map.framer-JY1LS .framer-jw1l9t-container {
+  aspect-ratio: auto !important;
+  height: 100vh !important;
+  min-height: 100vh !important;
+  width: 100vw !important;
+}
+
+.memory-lane-framer-map.framer-JY1LS .framer-1rqn11j,
+.memory-lane-framer-map.framer-JY1LS .framer-127asrl-container,
+.memory-lane-framer-map.framer-JY1LS .framer-3hblkp {
+  height: 100vh !important;
+  width: 100vw !important;
+}
