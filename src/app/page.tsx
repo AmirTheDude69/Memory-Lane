@@ -1,5 +1,5 @@
-import FixedGoldMap from '@/components/FixedGoldMap';
+import FullScreenFramerMap from '@/components/FullScreenFramerMap';
 
 export default function Home() {
-  return <FixedGoldMap />;
+  return <FullScreenFramerMap />;
 }
