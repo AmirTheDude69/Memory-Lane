@@ -1,19 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type {
-  Feature,
-  GeometryObject,
-  MultiPolygon,
-  Polygon,
-  Position,
-} from 'geojson';
+import type { Feature, GeometryObject, MultiPolygon, Polygon, Position } from 'geojson';
 import { feature as topojsonFeature } from 'topojson-client';
-import type {
-  GeometryObject as TopologyGeometryObject,
-  Topology,
-} from 'topojson-specification';
+import type { GeometryObject as TopologyGeometryObject, Topology } from 'topojson-specification';
 
+import countriesTopologyData from '@/data/countries-110m.json';
 import type { OverlayCalibration } from '@/data/mapOverlayConfig';
 import { countryAliases } from '@/data/trips';
 import { createWebMercatorProjector } from '@/lib/webMercator';
@@ -34,7 +26,40 @@ export type GoldCountryOverlayProps = {
   zoom: number;
 };
 
-let countriesPromise: Promise<CountryFeature[]> | null = null;
+const buildCountryFeatures = (): CountryFeature[] => {
+  const topology = countriesTopologyData as unknown as Topology;
+  const objectEntries = Object.entries(topology.objects ?? {});
+
+  if (objectEntries.length === 0) {
+    return [];
+  }
+
+  const objectKey = 'countries' in topology.objects ? 'countries' : objectEntries[0][0];
+  const topologyObject = topology.objects[objectKey] as TopologyGeometryObject;
+
+  const converted = topojsonFeature(topology, topologyObject);
+  const features = (
+    converted.type === 'FeatureCollection' ? converted.features : [converted]
+  ) as Array<Feature<GeometryObject>>;
+
+  return features
+    .filter(
+      (feature): feature is Feature<CountryGeometry> =>
+        feature.geometry?.type === 'Polygon' || feature.geometry?.type === 'MultiPolygon'
+    )
+    .map((feature, index) => {
+      const rawName = String(feature.properties?.name ?? feature.id ?? `country-${index}`);
+      const normalizedName = countryAliases[rawName] ?? rawName;
+
+      return {
+        geometry: feature.geometry,
+        id: String(feature.id ?? rawName ?? index),
+        normalizedName,
+      };
+    });
+};
+
+const COUNTRY_FEATURES = buildCountryFeatures();
 
 const projectRingToPath = (
   ring: Position[],
@@ -78,50 +103,6 @@ const geometryToPath = (
     .join(' ');
 };
 
-const loadCountryFeatures = async (): Promise<CountryFeature[]> => {
-  if (!countriesPromise) {
-    countriesPromise = (async () => {
-      const response = await fetch('/data/countries-110m.json');
-      if (!response.ok) {
-        throw new Error(`Failed to load country geometry: ${response.status}`);
-      }
-
-      const topology = (await response.json()) as Topology;
-      const objectEntries = Object.entries(topology.objects ?? {});
-      if (objectEntries.length === 0) return [];
-
-      const objectKey = 'countries' in topology.objects ? 'countries' : objectEntries[0][0];
-      const topologyObject = topology.objects[objectKey] as TopologyGeometryObject;
-
-      const converted = topojsonFeature(topology, topologyObject);
-      const features = (
-        converted.type === 'FeatureCollection'
-          ? converted.features
-          : [converted]
-      ) as Array<Feature<GeometryObject>>;
-
-      return features
-        .filter(
-          (feature): feature is Feature<CountryGeometry> =>
-            feature.geometry?.type === 'Polygon' ||
-            feature.geometry?.type === 'MultiPolygon'
-        )
-        .map((feature, index) => {
-          const rawName = String(feature.properties?.name ?? feature.id ?? `country-${index}`);
-          const normalizedName = countryAliases[rawName] ?? rawName;
-
-          return {
-            geometry: feature.geometry,
-            id: String(feature.id ?? rawName ?? index),
-            normalizedName,
-          };
-        });
-    })();
-  }
-
-  return countriesPromise;
-};
-
 export default function GoldCountryOverlay({
   calibration,
   location,
@@ -129,29 +110,7 @@ export default function GoldCountryOverlay({
   visitedCountries,
   zoom,
 }: GoldCountryOverlayProps) {
-  const [countryFeatures, setCountryFeatures] = useState<CountryFeature[]>([]);
-  const [hasLoadError, setHasLoadError] = useState(false);
   const [viewport, setViewport] = useState({ height: 0, width: 0 });
-
-  useEffect(() => {
-    let active = true;
-
-    loadCountryFeatures()
-      .then((features) => {
-        if (active) {
-          setCountryFeatures(features);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setHasLoadError(true);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
 
   useEffect(() => {
     const updateViewport = () => {
@@ -185,7 +144,7 @@ export default function GoldCountryOverlay({
       zoom,
     });
 
-    return countryFeatures
+    return COUNTRY_FEATURES
       .filter((country) =>
         normalizedVisitedCountries.has(country.normalizedName.toLowerCase())
       )
@@ -196,7 +155,6 @@ export default function GoldCountryOverlay({
       .filter((countryPath) => countryPath.path.length > 0);
   }, [
     calibration,
-    countryFeatures,
     location,
     normalizedVisitedCountries,
     viewport.height,
@@ -205,14 +163,14 @@ export default function GoldCountryOverlay({
     zoom,
   ]);
 
-  if (!visible || hasLoadError || countryPaths.length === 0) {
+  if (!visible || countryPaths.length === 0) {
     return null;
   }
 
   return (
     <svg
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 z-30 h-full w-full"
+      className="pointer-events-none fixed inset-0 z-[2147483640] h-full w-full"
       preserveAspectRatio="none"
       viewBox={`0 0 ${viewport.width} ${viewport.height}`}
     >
@@ -257,8 +215,9 @@ export default function GoldCountryOverlay({
           fillRule="evenodd"
           filter="url(#ml-overlay-gold-noise)"
           key={countryPath.id}
+          opacity={0.95}
           stroke="#B8860B"
-          strokeWidth={1}
+          strokeWidth={1.2}
         />
       ))}
     </svg>
