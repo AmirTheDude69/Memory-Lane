@@ -5,6 +5,12 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FeatureCollection, GeoJsonProperties, Geometry } from 'geojson';
 
+import {
+  formatPosterThemeLabel,
+  MAP_TO_POSTER_ENTRIES,
+  MAP_TO_POSTER_THEMES,
+  type PosterEntry,
+} from '@/data/maptoposter';
 import { trips, tripsBySlug, type Trip } from '@/data/trips';
 
 type TripPointDatum = {
@@ -50,14 +56,6 @@ const CATEGORY_COLOR_HEX: Record<CountryCategoryKey, string> = {
   vlada: '#3B82F6',
   separate: '#22C55E',
   wish: '#EC4899',
-};
-
-const CATEGORY_LABELS: Record<CountryCategoryKey, string> = {
-  together: "Together",
-  amir: 'Amir',
-  vlada: 'Vlada',
-  separate: 'Both (separate trips)',
-  wish: 'Wish list',
 };
 
 const FALLBACK_COUNTRY_GROUPS: CountryGroups = {
@@ -171,14 +169,72 @@ const toCountryGroups = (groups?: Partial<CountryGroups>): CountryGroups => {
 
 const hexToColorValue = (hex: string) => Number.parseInt(hex.replace('#', ''), 16);
 
+const uniqueSortedValues = (values: string[]) =>
+  Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
+
 export default function CountryQuestMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeTripSlug, setActiveTripSlug] = useState<string | null>(null);
   const [countryGroups, setCountryGroups] = useState<CountryGroups>(FALLBACK_COUNTRY_GROUPS);
+  const [isPosterPanelOpen, setIsPosterPanelOpen] = useState(false);
+  const [selectedCountry, setSelectedCountry] = useState('');
+  const [selectedCity, setSelectedCity] = useState('');
+  const [selectedTheme, setSelectedTheme] = useState('');
+  const [createdPosterUrl, setCreatedPosterUrl] = useState<string | null>(null);
+  const [createdPosterLabel, setCreatedPosterLabel] = useState<string>('');
+  const [isCreatingPoster, setIsCreatingPoster] = useState(false);
+  const [posterError, setPosterError] = useState<string | null>(null);
 
   const activeTrip: Trip | null = useMemo(
     () => (activeTripSlug ? tripsBySlug.get(activeTripSlug) ?? null : null),
     [activeTripSlug]
+  );
+
+  const posterCountries = useMemo(
+    () => uniqueSortedValues(MAP_TO_POSTER_ENTRIES.map((entry) => entry.country)),
+    []
+  );
+
+  const posterCities = useMemo(() => {
+    if (!selectedCountry) {
+      return [] as string[];
+    }
+    return uniqueSortedValues(
+      MAP_TO_POSTER_ENTRIES.filter((entry) => entry.country === selectedCountry).map(
+        (entry) => entry.city
+      )
+    );
+  }, [selectedCountry]);
+
+  const posterThemes = useMemo(() => {
+    if (!selectedCountry || !selectedCity) {
+      return [] as string[];
+    }
+
+    const availableThemes = MAP_TO_POSTER_ENTRIES.filter(
+      (entry) => entry.country === selectedCountry && entry.city === selectedCity
+    ).map((entry) => entry.theme);
+
+    return uniqueSortedValues(MAP_TO_POSTER_THEMES.filter((theme) => availableThemes.includes(theme)));
+  }, [selectedCity, selectedCountry]);
+
+  const selectedPosterEntry: PosterEntry | null = useMemo(
+    () =>
+      MAP_TO_POSTER_ENTRIES.find(
+        (entry) =>
+          entry.country === selectedCountry &&
+          entry.city === selectedCity &&
+          entry.theme === selectedTheme
+      ) ?? null,
+    [selectedCity, selectedCountry, selectedTheme]
+  );
+
+  const selectedPosterUrl = useMemo(
+    () =>
+      selectedPosterEntry
+        ? `/api/poster-image?file=${encodeURIComponent(selectedPosterEntry.file)}`
+        : null,
+    [selectedPosterEntry]
   );
 
   useEffect(() => {
@@ -208,6 +264,70 @@ export default function CountryQuestMap() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (posterCountries.length === 0) {
+      return;
+    }
+    if (!posterCountries.includes(selectedCountry)) {
+      setSelectedCountry(posterCountries[0]);
+    }
+  }, [posterCountries, selectedCountry]);
+
+  useEffect(() => {
+    if (posterCities.length === 0) {
+      setSelectedCity('');
+      return;
+    }
+    if (!posterCities.includes(selectedCity)) {
+      setSelectedCity(posterCities[0]);
+    }
+  }, [posterCities, selectedCity]);
+
+  useEffect(() => {
+    if (posterThemes.length === 0) {
+      setSelectedTheme('');
+      return;
+    }
+    if (!posterThemes.includes(selectedTheme)) {
+      setSelectedTheme(posterThemes[0]);
+    }
+  }, [posterThemes, selectedTheme]);
+
+  const handleCreatePoster = async () => {
+    if (!selectedPosterEntry || !selectedPosterUrl || isCreatingPoster) {
+      return;
+    }
+
+    setPosterError(null);
+    setIsCreatingPoster(true);
+
+    try {
+      setCreatedPosterUrl(selectedPosterUrl);
+      setCreatedPosterLabel(
+        `${selectedPosterEntry.city}, ${selectedPosterEntry.country} · ${formatPosterThemeLabel(selectedPosterEntry.theme)}`
+      );
+
+      const response = await fetch(selectedPosterUrl, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error('Poster could not be downloaded.');
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `${selectedPosterEntry.city.toLowerCase().replace(/\s+/g, '-')}_${selectedPosterEntry.theme}_poster.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 1500);
+    } catch {
+      setPosterError('Could not create/download this poster right now. Please try again.');
+    } finally {
+      setIsCreatingPoster(false);
+    }
+  };
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -394,21 +514,134 @@ export default function CountryQuestMap() {
       <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_top,rgba(255,215,0,0.08),rgba(8,15,29,0.95)_50%)]" />
       <div className="relative z-10 h-full w-full" ref={containerRef} />
 
-      <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-2xl border border-white/20 bg-black/60 px-4 py-3 backdrop-blur sm:left-6 sm:top-6">
-        <p className="text-[10px] uppercase tracking-[0.32em] text-amber-200">Memory Lane</p>
-        <p className="mt-1 text-sm text-slate-100">Country colors from your sheet</p>
-        <div className="mt-2 space-y-1">
-          {CATEGORY_ORDER.map((category) => (
-            <p className="flex items-center gap-2 text-xs text-slate-200" key={category}>
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-full border border-white/30"
-                style={{ backgroundColor: CATEGORY_COLOR_HEX[category] }}
-              />
-              <span>{CATEGORY_LABELS[category]}</span>
-            </p>
-          ))}
-        </div>
+      <div className="absolute right-4 top-4 z-40 sm:right-6 sm:top-6">
+        <button
+          className="rounded-full border border-white/30 bg-black/55 px-4 py-2 text-xs font-medium tracking-[0.16em] text-white backdrop-blur transition hover:bg-black/70"
+          onClick={() => {
+            setPosterError(null);
+            setIsPosterPanelOpen((current) => !current);
+          }}
+          type="button"
+        >
+          Create Poster
+        </button>
       </div>
+
+      {isPosterPanelOpen && (
+        <aside className="absolute right-4 top-16 z-40 w-[min(92vw,360px)] space-y-3 rounded-2xl border border-white/20 bg-[#0a1019e6] p-4 shadow-[0_20px_45px_rgba(0,0,0,0.45)] backdrop-blur sm:right-6 sm:top-20">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.24em] text-slate-300">MapToPoster</p>
+              <p className="mt-1 text-sm text-white">Country · City · Theme</p>
+            </div>
+            <button
+              aria-label="Close poster creator"
+              className="rounded-full border border-white/20 px-2 py-1 text-xs text-slate-200 transition hover:bg-white/10"
+              onClick={() => setIsPosterPanelOpen(false)}
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-[11px] uppercase tracking-[0.14em] text-slate-300" htmlFor="poster-country">
+              Country
+            </label>
+            <select
+              className="w-full rounded-lg border border-white/15 bg-black/45 px-3 py-2 text-sm text-white outline-none focus:border-white/40"
+              id="poster-country"
+              onChange={(event) => setSelectedCountry(event.target.value)}
+              value={selectedCountry}
+            >
+              {posterCountries.map((country) => (
+                <option key={country} value={country}>
+                  {country}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-[11px] uppercase tracking-[0.14em] text-slate-300" htmlFor="poster-city">
+              City
+            </label>
+            <select
+              className="w-full rounded-lg border border-white/15 bg-black/45 px-3 py-2 text-sm text-white outline-none focus:border-white/40"
+              id="poster-city"
+              onChange={(event) => setSelectedCity(event.target.value)}
+              value={selectedCity}
+            >
+              {posterCities.map((city) => (
+                <option key={city} value={city}>
+                  {city}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-[11px] uppercase tracking-[0.14em] text-slate-300" htmlFor="poster-theme">
+              Theme
+            </label>
+            <select
+              className="w-full rounded-lg border border-white/15 bg-black/45 px-3 py-2 text-sm text-white outline-none focus:border-white/40"
+              id="poster-theme"
+              onChange={(event) => setSelectedTheme(event.target.value)}
+              value={selectedTheme}
+            >
+              {posterThemes.map((theme) => (
+                <option key={theme} value={theme}>
+                  {formatPosterThemeLabel(theme)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-white/15 bg-black/30">
+            {selectedPosterUrl ? (
+              <Image
+                alt="Poster live preview"
+                className="h-[190px] w-full object-cover"
+                height={1600}
+                src={selectedPosterUrl}
+                unoptimized
+                width={1200}
+              />
+            ) : (
+              <div className="flex h-[190px] items-center justify-center px-4 text-center text-sm text-slate-300">
+                Choose a country, city, and theme to preview.
+              </div>
+            )}
+          </div>
+
+          <button
+            className="w-full rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-sm text-amber-100 transition hover:bg-amber-300/20 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!selectedPosterEntry || isCreatingPoster}
+            onClick={handleCreatePoster}
+            type="button"
+          >
+            {isCreatingPoster ? 'Creating...' : 'Create'}
+          </button>
+
+          {posterError && <p className="text-xs text-rose-300">{posterError}</p>}
+
+          {createdPosterUrl && (
+            <div className="space-y-2 rounded-xl border border-white/15 bg-black/30 p-3">
+              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-300">Created</p>
+              <p className="text-xs text-slate-200">{createdPosterLabel}</p>
+              <Image
+                alt={createdPosterLabel || 'Created poster'}
+                className="h-[190px] w-full rounded-lg object-cover"
+                height={1600}
+                src={createdPosterUrl}
+                unoptimized
+                width={1200}
+              />
+            </div>
+          )}
+        </aside>
+      )}
 
       {activeTrip && (
         <aside className="absolute bottom-4 left-4 right-4 z-30 overflow-hidden rounded-2xl border border-amber-200/30 bg-slate-950/90 shadow-[0_24px_48px_rgba(0,0,0,0.45)] backdrop-blur sm:bottom-6 sm:left-auto sm:right-6 sm:top-6 sm:w-[360px]">
