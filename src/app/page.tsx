@@ -1,5 +1,5 @@
-import FullScreenFramerMap from '@/components/FullScreenFramerMap';
+import CountryQuestMap from '@/components/CountryQuestMap';
 
 export default function Home() {
-  return <FullScreenFramerMap />;
+  return <CountryQuestMap />;
 }
