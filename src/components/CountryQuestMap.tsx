@@ -27,7 +27,6 @@ type CountryColorsResponse = {
 
 type WorldFeature = {
   id?: string;
-  geometry?: Geometry;
   properties?: {
     name?: string;
   };
@@ -35,24 +34,6 @@ type WorldFeature = {
 
 type WorldGeoJson = {
   features?: WorldFeature[];
-};
-
-type GeoBounds = {
-  bottom: number;
-  left: number;
-  right: number;
-  top: number;
-};
-
-type CountryLabelDatum = {
-  bounds: GeoBounds;
-  code: string;
-  polygonId: string;
-};
-
-type LabelController = {
-  set: (key: string, value: unknown) => void;
-  setAll: (settings: Record<string, unknown>) => void;
 };
 
 const CATEGORY_ORDER: CountryCategoryKey[] = [
@@ -189,66 +170,6 @@ const toCountryGroups = (groups?: Partial<CountryGroups>): CountryGroups => {
 };
 
 const hexToColorValue = (hex: string) => Number.parseInt(hex.replace('#', ''), 16);
-
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
-const extractGeoPoints = (value: unknown, points: Array<[number, number]>) => {
-  if (!Array.isArray(value)) {
-    return;
-  }
-
-  if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
-    points.push([value[0], value[1]]);
-    return;
-  }
-
-  for (const child of value) {
-    extractGeoPoints(child, points);
-  }
-};
-
-const collectGeometryPoints = (geometry: Geometry, points: Array<[number, number]>) => {
-  if (geometry.type === 'GeometryCollection') {
-    for (const subGeometry of geometry.geometries) {
-      collectGeometryPoints(subGeometry, points);
-    }
-    return;
-  }
-
-  extractGeoPoints(geometry.coordinates, points);
-};
-
-const getGeometryBounds = (geometry?: Geometry): GeoBounds | null => {
-  if (!geometry) {
-    return null;
-  }
-
-  const points: Array<[number, number]> = [];
-  collectGeometryPoints(geometry, points);
-
-  if (points.length === 0) {
-    return null;
-  }
-
-  let left = Number.POSITIVE_INFINITY;
-  let right = Number.NEGATIVE_INFINITY;
-  let top = Number.NEGATIVE_INFINITY;
-  let bottom = Number.POSITIVE_INFINITY;
-
-  for (const [longitude, latitude] of points) {
-    left = Math.min(left, longitude);
-    right = Math.max(right, longitude);
-    top = Math.max(top, latitude);
-    bottom = Math.min(bottom, latitude);
-  }
-
-  return {
-    bottom,
-    left,
-    right,
-    top,
-  };
-};
 
 export default function CountryQuestMap() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -397,98 +318,6 @@ export default function CountryQuestMap() {
           };
         })
       );
-
-      const countryLabelSprites: Array<{ bounds: GeoBounds; label: LabelController }> = [];
-
-      const countryLabelSeries = chart.series.push(
-        am5map.MapPointSeries.new(root, {
-          polygonIdField: 'polygonId',
-        })
-      );
-
-      countryLabelSeries.bullets.push((bulletRoot, dataItem) => {
-        const markerDataItem = dataItem as unknown as {
-          dataContext?: CountryLabelDatum;
-        };
-        const labelSprite = am5.Label.new(bulletRoot, {
-          centerX: am5.p50,
-          centerY: am5.p50,
-          fill: am5.color(0xe2e8f0),
-          fontFamily: 'monospace',
-          fontSize: 8,
-          fontWeight: '600',
-          interactive: false,
-          opacity: 0.72,
-          populateText: true,
-          text: '{code}',
-          textAlign: 'center',
-        });
-
-        if (markerDataItem.dataContext?.bounds) {
-          countryLabelSprites.push({
-            bounds: markerDataItem.dataContext.bounds,
-            label: labelSprite as unknown as LabelController,
-          });
-        }
-
-        return am5.Bullet.new(bulletRoot, { sprite: labelSprite });
-      });
-
-      countryLabelSeries.data.setAll(
-        (worldLow.features ?? [])
-          .map((feature) => {
-            const countryCode = String(feature.id ?? '').toUpperCase();
-            if (!/^[A-Z]{2}$/.test(countryCode) || countryCode === 'AQ') {
-              return null;
-            }
-
-            const bounds = getGeometryBounds(feature.geometry);
-            if (!bounds) {
-              return null;
-            }
-
-            return {
-              bounds,
-              code: countryCode,
-              polygonId: countryCode,
-            } satisfies CountryLabelDatum;
-          })
-          .filter((item): item is CountryLabelDatum => item !== null)
-      );
-
-      const updateCountryLabels = () => {
-        for (const countryLabel of countryLabelSprites) {
-          const topLeft = chart.convert({
-            latitude: countryLabel.bounds.top,
-            longitude: countryLabel.bounds.left,
-          });
-          const bottomRight = chart.convert({
-            latitude: countryLabel.bounds.bottom,
-            longitude: countryLabel.bounds.right,
-          });
-
-          const width = Math.abs(bottomRight.x - topLeft.x);
-          const height = Math.abs(bottomRight.y - topLeft.y);
-          const candidateFontSize = Math.floor(clamp(Math.min(width / 2.3, height * 0.9), 6, 16));
-          const shouldShow =
-            Number.isFinite(width) &&
-            Number.isFinite(height) &&
-            width >= 14 &&
-            height >= 10 &&
-            candidateFontSize >= 7;
-
-          countryLabel.label.set('visible', shouldShow);
-          if (shouldShow) {
-            countryLabel.label.setAll({
-              fontSize: candidateFontSize,
-              opacity: 0.75,
-            });
-          }
-        }
-      };
-
-      chart.events.on('geoboundschanged', updateCountryLabels);
-      setTimeout(updateCountryLabels, 120);
 
       const citySeries = chart.series.push(am5map.MapPointSeries.new(root, {}));
       citySeries.bullets.push((bulletRoot, dataItem) => {
