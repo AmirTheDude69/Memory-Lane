@@ -210,6 +210,30 @@ export default function CountryQuestMap() {
   );
 
   const selectedPosterTheme = POSTER_THEME_BY_ID[selectedThemeId];
+  const cityOptions = useMemo(() => {
+    const options = [...posterCities];
+    const seen = new Set(options.map((city) => city.toLowerCase()));
+
+    const maybeAdd = (value: string) => {
+      const normalized = value.trim();
+      if (!normalized) {
+        return;
+      }
+
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) {
+        return;
+      }
+
+      seen.add(key);
+      options.unshift(normalized);
+    };
+
+    maybeAdd(cityQuery);
+    maybeAdd(selectedPosterCity);
+
+    return options;
+  }, [cityQuery, posterCities, selectedPosterCity]);
 
   const posterMapUrl = useMemo(() => {
     if (!selectedPosterCountry || !selectedPosterCity) {
@@ -354,17 +378,6 @@ export default function CountryQuestMap() {
       clearTimeout(timer);
     };
   }, [cityQuery, isPosterPanelOpen, selectedPosterCountry]);
-
-  useEffect(() => {
-    if (posterCities.length === 0) {
-      setSelectedPosterCity('');
-      return;
-    }
-
-    if (!posterCities.includes(selectedPosterCity)) {
-      setSelectedPosterCity(posterCities[0]);
-    }
-  }, [posterCities, selectedPosterCity]);
 
   useEffect(() => {
     setCreatedPosterUrl(null);
@@ -603,7 +616,7 @@ export default function CountryQuestMap() {
       </div>
 
       {isPosterPanelOpen && (
-        <aside className="absolute right-4 top-16 z-40 w-[min(92vw,390px)] space-y-3 rounded-2xl border border-white/20 bg-[#0a1019e6] p-4 shadow-[0_20px_45px_rgba(0,0,0,0.45)] backdrop-blur sm:right-6 sm:top-20">
+        <aside className="absolute right-4 top-16 z-40 max-h-[calc(100vh-6.25rem)] w-[min(92vw,390px)] space-y-3 overflow-y-auto rounded-2xl border border-white/20 bg-[#0a1019e6] p-4 shadow-[0_20px_45px_rgba(0,0,0,0.45)] backdrop-blur sm:right-6 sm:top-20">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-[10px] uppercase tracking-[0.24em] text-slate-300">MapToPoster</p>
@@ -670,9 +683,11 @@ export default function CountryQuestMap() {
               onChange={(event) => setSelectedPosterCity(event.target.value)}
               value={selectedPosterCity}
             >
-              {isCitiesLoading && <option value="">Loading cities...</option>}
-              {!isCitiesLoading && posterCities.length === 0 && <option value="">No matches</option>}
-              {posterCities.map((city) => (
+              <option value="">
+                {isCitiesLoading ? 'Loading cities...' : 'Select city'}
+              </option>
+              {!isCitiesLoading && cityOptions.length === 0 && <option value="">No matches</option>}
+              {cityOptions.map((city) => (
                 <option key={city} value={city}>
                   {city}
                 </option>
@@ -703,76 +718,6 @@ export default function CountryQuestMap() {
             </select>
           </div>
 
-          <div
-            className="relative overflow-hidden rounded-xl border border-white/15"
-            ref={posterPreviewRef}
-            style={{
-              aspectRatio: '3 / 4',
-              backgroundColor: selectedPosterTheme.bg,
-            }}
-          >
-            {posterMapUrl ? (
-              <Image
-                alt="Poster preview map"
-                className="object-cover"
-                fill
-                src={posterMapUrl}
-                style={{
-                  filter: 'grayscale(1) contrast(1.24) brightness(1.08)',
-                  mixBlendMode: 'multiply',
-                  opacity: 0.9,
-                }}
-                unoptimized
-              />
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center px-5 text-center text-sm text-slate-300">
-                Pick country and city to render map preview.
-              </div>
-            )}
-
-            <div
-              className="pointer-events-none absolute inset-0"
-              style={{
-                background: `linear-gradient(180deg, ${selectedPosterTheme.gradientColor}14 0%, ${selectedPosterTheme.bg}D0 78%, ${selectedPosterTheme.bg} 100%)`,
-              }}
-            />
-            <div
-              className="pointer-events-none absolute inset-0"
-              style={{
-                backgroundColor: selectedPosterTheme.roadSecondary,
-                mixBlendMode: 'soft-light',
-                opacity: 0.35,
-              }}
-            />
-
-            <div className="absolute bottom-0 left-0 right-0 px-5 pb-5 pt-12">
-              <p
-                className="text-[10px] tracking-[0.35em]"
-                style={{
-                  color: selectedPosterTheme.text,
-                }}
-              >
-                MEMORY LANE
-              </p>
-              <h3
-                className="mt-2 text-2xl font-semibold leading-tight"
-                style={{
-                  color: selectedPosterTheme.text,
-                }}
-              >
-                {selectedPosterCity || 'City'}
-              </h3>
-              <p
-                className="mt-1 text-sm uppercase tracking-[0.2em]"
-                style={{
-                  color: selectedPosterTheme.text,
-                }}
-              >
-                {selectedPosterCountry || 'Country'}
-              </p>
-            </div>
-          </div>
-
           <button
             className="w-full rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-sm text-amber-100 transition hover:bg-amber-300/20 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!posterMapUrl || isCreatingPoster}
@@ -781,6 +726,77 @@ export default function CountryQuestMap() {
           >
             {isCreatingPoster ? 'Creating...' : 'Create'}
           </button>
+
+          {!selectedPosterCity && (
+            <p className="text-xs text-slate-400">Preview appears after you select a city.</p>
+          )}
+
+          {selectedPosterCity && (
+            <div
+              className="relative h-[170px] overflow-hidden rounded-xl border border-white/15"
+              ref={posterPreviewRef}
+              style={{
+                backgroundColor: selectedPosterTheme.bg,
+              }}
+            >
+              {posterMapUrl && (
+                <Image
+                  alt="Poster preview map"
+                  className="object-cover"
+                  fill
+                  src={posterMapUrl}
+                  style={{
+                    filter: 'grayscale(1) contrast(1.24) brightness(1.08)',
+                    mixBlendMode: 'multiply',
+                    opacity: 0.9,
+                  }}
+                  unoptimized
+                />
+              )}
+
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  background: `linear-gradient(180deg, ${selectedPosterTheme.gradientColor}14 0%, ${selectedPosterTheme.bg}D0 78%, ${selectedPosterTheme.bg} 100%)`,
+                }}
+              />
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  backgroundColor: selectedPosterTheme.roadSecondary,
+                  mixBlendMode: 'soft-light',
+                  opacity: 0.35,
+                }}
+              />
+
+              <div className="absolute bottom-0 left-0 right-0 px-3 pb-2 pt-10">
+                <p
+                  className="text-[9px] tracking-[0.25em]"
+                  style={{
+                    color: selectedPosterTheme.text,
+                  }}
+                >
+                  MEMORY LANE
+                </p>
+                <h3
+                  className="mt-1 text-sm font-semibold leading-tight"
+                  style={{
+                    color: selectedPosterTheme.text,
+                  }}
+                >
+                  {selectedPosterCity}
+                </h3>
+                <p
+                  className="mt-0.5 text-[10px] uppercase tracking-[0.13em]"
+                  style={{
+                    color: selectedPosterTheme.text,
+                  }}
+                >
+                  {selectedPosterCountry}
+                </p>
+              </div>
+            </div>
+          )}
 
           {posterError && <p className="text-xs text-rose-300">{posterError}</p>}
 

@@ -1,13 +1,7 @@
 import { NextResponse } from 'next/server';
+import worldLow from '@amcharts/amcharts5-geodata/json/worldLow';
 
 import { normalizePosterCountry } from '@/data/maptoposter';
-
-type CountriesResponse = {
-  data?: Array<{
-    name?: string;
-  }>;
-  error?: boolean;
-};
 
 type CitiesResponse = {
   data?: string[];
@@ -19,7 +13,6 @@ type CacheValue = {
   value: string[];
 };
 
-const COUNTRIES_URL = 'https://countriesnow.space/api/v0.1/countries/positions';
 const CITIES_URL = 'https://countriesnow.space/api/v0.1/countries/cities/q?country=';
 const CACHE_TTL_MS = 1000 * 60 * 60 * 6;
 const MAX_LIMIT = 500;
@@ -44,49 +37,29 @@ const parseLimit = (value: string | null): number => {
   return Math.max(MIN_LIMIT, Math.min(MAX_LIMIT, parsed));
 };
 
-const fallbackCountries = async (): Promise<string[]> => {
-  const worldLowModule = await import('@amcharts/amcharts5-geodata/json/worldLow');
-  const world = worldLowModule.default as {
-    features?: Array<{
-      properties?: {
-        name?: string;
-      };
-    }>;
-  };
-
-  return withUniqueSortedValues(
-    (world.features ?? []).map((feature) => feature.properties?.name ?? '')
-  );
-};
+const LOCAL_COUNTRIES = withUniqueSortedValues(
+  (
+    worldLow as {
+      features?: Array<{
+        properties?: {
+          name?: string;
+        };
+      }>;
+    }
+  ).features?.map((feature) => feature.properties?.name ?? '') ?? []
+);
 
 const getCountries = async () => {
   if (isFresh(countriesCache.current)) {
     return countriesCache.current!.value;
   }
 
-  const response = await fetch(COUNTRIES_URL, {
-    next: { revalidate: 60 * 60 * 6 },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Countries fetch failed: ${response.status}`);
-  }
-
-  const payload = (await response.json()) as CountriesResponse;
-  if (payload.error) {
-    throw new Error('Countries API returned error.');
-  }
-
-  const countries = withUniqueSortedValues(
-    (payload.data ?? []).map((country) => country.name ?? '')
-  );
-
   countriesCache.current = {
     expiresAt: Date.now() + CACHE_TTL_MS,
-    value: countries,
+    value: LOCAL_COUNTRIES,
   };
 
-  return countries;
+  return LOCAL_COUNTRIES;
 };
 
 const getCities = async (country: string) => {
@@ -97,9 +70,13 @@ const getCities = async (country: string) => {
     return cached!.value;
   }
 
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), 10_000);
+
   const response = await fetch(`${CITIES_URL}${encodeURIComponent(normalizedCountry)}`, {
     next: { revalidate: 60 * 60 * 6 },
-  });
+    signal: abortController.signal,
+  }).finally(() => clearTimeout(timeout));
 
   if (!response.ok) {
     throw new Error(`Cities fetch failed: ${response.status}`);
@@ -129,13 +106,8 @@ export async function GET(request: Request) {
   const limit = parseLimit(searchParams.get('limit'));
 
   if (!country) {
-    try {
-      const countries = await getCountries();
-      return NextResponse.json({ countries, source: 'countriesnow' });
-    } catch {
-      const countries = await fallbackCountries();
-      return NextResponse.json({ countries, source: 'fallback' });
-    }
+    const countries = await getCountries();
+    return NextResponse.json({ countries, source: 'local-world' });
   }
 
   try {
