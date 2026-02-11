@@ -11,6 +11,7 @@ import {
   POSTER_THEME_IDS,
   type PosterThemeId,
 } from '@/data/maptoposter';
+import { POSTER_COUNTRIES } from '@/data/posterCountries';
 import { trips, tripsBySlug, type Trip } from '@/data/trips';
 
 type TripPointDatum = {
@@ -29,10 +30,6 @@ type CountryGroups = Record<CountryCategoryKey, string[]>;
 
 type CountryColorsResponse = {
   countryGroups?: Partial<CountryGroups>;
-};
-
-type PosterCountryOptionsResponse = {
-  countries?: string[];
 };
 
 type PosterCityOptionsResponse = {
@@ -189,7 +186,7 @@ export default function CountryQuestMap() {
   const [countryGroups, setCountryGroups] = useState<CountryGroups>(FALLBACK_COUNTRY_GROUPS);
 
   const [isPosterPanelOpen, setIsPosterPanelOpen] = useState(false);
-  const [posterCountries, setPosterCountries] = useState<string[]>([]);
+  const posterCountries = POSTER_COUNTRIES as unknown as string[];
   const [selectedPosterCountry, setSelectedPosterCountry] = useState('');
   const [cityQuery, setCityQuery] = useState('');
   const [posterCities, setPosterCities] = useState<string[]>([]);
@@ -197,7 +194,6 @@ export default function CountryQuestMap() {
   const [selectedPosterCity, setSelectedPosterCity] = useState('');
   const [selectedThemeId, setSelectedThemeId] = useState<PosterThemeId>('terracotta');
 
-  const [isCountriesLoading, setIsCountriesLoading] = useState(false);
   const [isCitiesLoading, setIsCitiesLoading] = useState(false);
   const [isCreatingPoster, setIsCreatingPoster] = useState(false);
   const [posterError, setPosterError] = useState<string | null>(null);
@@ -279,47 +275,10 @@ export default function CountryQuestMap() {
   }, []);
 
   useEffect(() => {
-    if (!isPosterPanelOpen || posterCountries.length > 0 || isCountriesLoading) {
-      return;
+    if (!selectedPosterCountry && posterCountries.length > 0) {
+      setSelectedPosterCountry(posterCountries[0]);
     }
-
-    let cancelled = false;
-
-    const loadPosterCountries = async () => {
-      setIsCountriesLoading(true);
-
-      try {
-        const response = await fetch('/api/poster-options', { cache: 'no-store' });
-        if (!response.ok) {
-          throw new Error('Could not load countries.');
-        }
-
-        const payload = (await response.json()) as PosterCountryOptionsResponse;
-        const countries = withUniqueSortedValues(payload.countries ?? []);
-
-        if (!cancelled) {
-          setPosterCountries(countries);
-          if (!selectedPosterCountry && countries.length > 0) {
-            setSelectedPosterCountry(countries[0]);
-          }
-        }
-      } catch {
-        if (!cancelled) {
-          setPosterError('Could not load country list right now. Please try again.');
-        }
-      } finally {
-        if (!cancelled) {
-          setIsCountriesLoading(false);
-        }
-      }
-    };
-
-    void loadPosterCountries();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isCountriesLoading, isPosterPanelOpen, posterCountries.length, selectedPosterCountry]);
+  }, [posterCountries, selectedPosterCountry]);
 
   useEffect(() => {
     if (!isPosterPanelOpen || !selectedPosterCountry) {
@@ -638,7 +597,6 @@ export default function CountryQuestMap() {
             </label>
             <select
               className="w-full rounded-lg border border-white/15 bg-black/45 px-3 py-2 text-sm text-white outline-none focus:border-white/40"
-              disabled={isCountriesLoading}
               id="poster-country"
               onChange={(event) => {
                 setSelectedPosterCountry(event.target.value);
@@ -647,10 +605,7 @@ export default function CountryQuestMap() {
               }}
               value={selectedPosterCountry}
             >
-              {isCountriesLoading && <option value="">Loading countries...</option>}
-              {!isCountriesLoading && posterCountries.length === 0 && (
-                <option value="">No countries available</option>
-              )}
+              {posterCountries.length === 0 && <option value="">No countries available</option>}
               {posterCountries.map((country) => (
                 <option key={country} value={country}>
                   {country}
