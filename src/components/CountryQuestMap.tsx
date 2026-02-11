@@ -1,15 +1,15 @@
 'use client';
 
+import { toPng } from 'html-to-image';
+import type { FeatureCollection, GeoJsonProperties, Geometry } from 'geojson';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { FeatureCollection, GeoJsonProperties, Geometry } from 'geojson';
 
 import {
-  formatPosterThemeLabel,
-  MAP_TO_POSTER_ENTRIES,
-  MAP_TO_POSTER_THEMES,
-  type PosterEntry,
+  POSTER_THEME_BY_ID,
+  POSTER_THEME_IDS,
+  type PosterThemeId,
 } from '@/data/maptoposter';
 import { trips, tripsBySlug, type Trip } from '@/data/trips';
 
@@ -29,6 +29,15 @@ type CountryGroups = Record<CountryCategoryKey, string[]>;
 
 type CountryColorsResponse = {
   countryGroups?: Partial<CountryGroups>;
+};
+
+type PosterCountryOptionsResponse = {
+  countries?: string[];
+};
+
+type PosterCityOptionsResponse = {
+  cities?: string[];
+  total?: number;
 };
 
 type WorldFeature = {
@@ -136,6 +145,11 @@ const normalizeCountryName = (countryName: string) => {
   return COUNTRY_NAME_ALIASES[normalized] ?? normalized;
 };
 
+const withUniqueSortedValues = (values: string[]) =>
+  Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((left, right) =>
+    left.localeCompare(right)
+  );
+
 const toCountryGroups = (groups?: Partial<CountryGroups>): CountryGroups => {
   const merged: CountryGroups = {
     together: [...FALLBACK_COUNTRY_GROUPS.together],
@@ -155,12 +169,8 @@ const toCountryGroups = (groups?: Partial<CountryGroups>): CountryGroups => {
       continue;
     }
 
-    merged[category] = Array.from(
-      new Set(
-        values
-          .map((value) => (typeof value === 'string' ? value.trim() : ''))
-          .filter((value) => value.length > 0)
-      )
+    merged[category] = withUniqueSortedValues(
+      values.map((value) => (typeof value === 'string' ? value : ''))
     );
   }
 
@@ -169,73 +179,52 @@ const toCountryGroups = (groups?: Partial<CountryGroups>): CountryGroups => {
 
 const hexToColorValue = (hex: string) => Number.parseInt(hex.replace('#', ''), 16);
 
-const uniqueSortedValues = (values: string[]) =>
-  Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
+const labelForTheme = (themeId: PosterThemeId) => POSTER_THEME_BY_ID[themeId].label;
 
 export default function CountryQuestMap() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const posterPreviewRef = useRef<HTMLDivElement>(null);
+
   const [activeTripSlug, setActiveTripSlug] = useState<string | null>(null);
   const [countryGroups, setCountryGroups] = useState<CountryGroups>(FALLBACK_COUNTRY_GROUPS);
+
   const [isPosterPanelOpen, setIsPosterPanelOpen] = useState(false);
-  const [selectedCountry, setSelectedCountry] = useState('');
-  const [selectedCity, setSelectedCity] = useState('');
-  const [selectedTheme, setSelectedTheme] = useState('');
-  const [createdPosterUrl, setCreatedPosterUrl] = useState<string | null>(null);
-  const [createdPosterLabel, setCreatedPosterLabel] = useState<string>('');
+  const [posterCountries, setPosterCountries] = useState<string[]>([]);
+  const [selectedPosterCountry, setSelectedPosterCountry] = useState('');
+  const [cityQuery, setCityQuery] = useState('');
+  const [posterCities, setPosterCities] = useState<string[]>([]);
+  const [posterCityTotal, setPosterCityTotal] = useState(0);
+  const [selectedPosterCity, setSelectedPosterCity] = useState('');
+  const [selectedThemeId, setSelectedThemeId] = useState<PosterThemeId>('terracotta');
+
+  const [isCountriesLoading, setIsCountriesLoading] = useState(false);
+  const [isCitiesLoading, setIsCitiesLoading] = useState(false);
   const [isCreatingPoster, setIsCreatingPoster] = useState(false);
   const [posterError, setPosterError] = useState<string | null>(null);
+  const [createdPosterUrl, setCreatedPosterUrl] = useState<string | null>(null);
+  const [createdPosterLabel, setCreatedPosterLabel] = useState('');
 
   const activeTrip: Trip | null = useMemo(
     () => (activeTripSlug ? tripsBySlug.get(activeTripSlug) ?? null : null),
     [activeTripSlug]
   );
 
-  const posterCountries = useMemo(
-    () => uniqueSortedValues(MAP_TO_POSTER_ENTRIES.map((entry) => entry.country)),
-    []
-  );
+  const selectedPosterTheme = POSTER_THEME_BY_ID[selectedThemeId];
 
-  const posterCities = useMemo(() => {
-    if (!selectedCountry) {
-      return [] as string[];
-    }
-    return uniqueSortedValues(
-      MAP_TO_POSTER_ENTRIES.filter((entry) => entry.country === selectedCountry).map(
-        (entry) => entry.city
-      )
-    );
-  }, [selectedCountry]);
-
-  const posterThemes = useMemo(() => {
-    if (!selectedCountry || !selectedCity) {
-      return [] as string[];
+  const posterMapUrl = useMemo(() => {
+    if (!selectedPosterCountry || !selectedPosterCity) {
+      return null;
     }
 
-    const availableThemes = MAP_TO_POSTER_ENTRIES.filter(
-      (entry) => entry.country === selectedCountry && entry.city === selectedCity
-    ).map((entry) => entry.theme);
+    const params = new URLSearchParams({
+      city: selectedPosterCity,
+      country: selectedPosterCountry,
+      size: '1100',
+      zoom: '12',
+    });
 
-    return uniqueSortedValues(MAP_TO_POSTER_THEMES.filter((theme) => availableThemes.includes(theme)));
-  }, [selectedCity, selectedCountry]);
-
-  const selectedPosterEntry: PosterEntry | null = useMemo(
-    () =>
-      MAP_TO_POSTER_ENTRIES.find(
-        (entry) =>
-          entry.country === selectedCountry &&
-          entry.city === selectedCity &&
-          entry.theme === selectedTheme
-      ) ?? null,
-    [selectedCity, selectedCountry, selectedTheme]
-  );
-
-  const selectedPosterUrl = useMemo(
-    () =>
-      selectedPosterEntry
-        ? `/api/poster-image?file=${encodeURIComponent(selectedPosterEntry.file)}`
-        : null,
-    [selectedPosterEntry]
-  );
+    return `/api/poster-map?${params.toString()}`;
+  }, [selectedPosterCity, selectedPosterCountry]);
 
   useEffect(() => {
     let cancelled = false;
@@ -266,36 +255,124 @@ export default function CountryQuestMap() {
   }, []);
 
   useEffect(() => {
-    if (posterCountries.length === 0) {
+    if (!isPosterPanelOpen || posterCountries.length > 0 || isCountriesLoading) {
       return;
     }
-    if (!posterCountries.includes(selectedCountry)) {
-      setSelectedCountry(posterCountries[0]);
+
+    let cancelled = false;
+
+    const loadPosterCountries = async () => {
+      setIsCountriesLoading(true);
+
+      try {
+        const response = await fetch('/api/poster-options', { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error('Could not load countries.');
+        }
+
+        const payload = (await response.json()) as PosterCountryOptionsResponse;
+        const countries = withUniqueSortedValues(payload.countries ?? []);
+
+        if (!cancelled) {
+          setPosterCountries(countries);
+          if (!selectedPosterCountry && countries.length > 0) {
+            setSelectedPosterCountry(countries[0]);
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setPosterError('Could not load country list right now. Please try again.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsCountriesLoading(false);
+        }
+      }
+    };
+
+    void loadPosterCountries();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isCountriesLoading, isPosterPanelOpen, posterCountries.length, selectedPosterCountry]);
+
+  useEffect(() => {
+    if (!isPosterPanelOpen || !selectedPosterCountry) {
+      return;
     }
-  }, [posterCountries, selectedCountry]);
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const loadPosterCities = async () => {
+        setIsCitiesLoading(true);
+        setPosterError(null);
+
+        try {
+          const params = new URLSearchParams({
+            country: selectedPosterCountry,
+            limit: '300',
+          });
+
+          if (cityQuery.trim().length > 0) {
+            params.set('query', cityQuery.trim());
+          }
+
+          const response = await fetch(`/api/poster-options?${params.toString()}`, {
+            cache: 'no-store',
+          });
+
+          if (!response.ok) {
+            throw new Error('Could not load city options.');
+          }
+
+          const payload = (await response.json()) as PosterCityOptionsResponse;
+          const cities = withUniqueSortedValues(payload.cities ?? []);
+
+          if (!cancelled) {
+            setPosterCities(cities);
+            setPosterCityTotal(payload.total ?? cities.length);
+          }
+        } catch {
+          if (!cancelled) {
+            setPosterCities([]);
+            setPosterCityTotal(0);
+            setPosterError('Could not load cities for that country right now.');
+          }
+        } finally {
+          if (!cancelled) {
+            setIsCitiesLoading(false);
+          }
+        }
+      };
+
+      void loadPosterCities();
+    }, 260);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [cityQuery, isPosterPanelOpen, selectedPosterCountry]);
 
   useEffect(() => {
     if (posterCities.length === 0) {
-      setSelectedCity('');
+      setSelectedPosterCity('');
       return;
     }
-    if (!posterCities.includes(selectedCity)) {
-      setSelectedCity(posterCities[0]);
+
+    if (!posterCities.includes(selectedPosterCity)) {
+      setSelectedPosterCity(posterCities[0]);
     }
-  }, [posterCities, selectedCity]);
+  }, [posterCities, selectedPosterCity]);
 
   useEffect(() => {
-    if (posterThemes.length === 0) {
-      setSelectedTheme('');
-      return;
-    }
-    if (!posterThemes.includes(selectedTheme)) {
-      setSelectedTheme(posterThemes[0]);
-    }
-  }, [posterThemes, selectedTheme]);
+    setCreatedPosterUrl(null);
+    setCreatedPosterLabel('');
+  }, [selectedPosterCity, selectedPosterCountry, selectedThemeId]);
 
   const handleCreatePoster = async () => {
-    if (!selectedPosterEntry || !selectedPosterUrl || isCreatingPoster) {
+    if (!posterPreviewRef.current || !selectedPosterCountry || !selectedPosterCity) {
       return;
     }
 
@@ -303,27 +380,25 @@ export default function CountryQuestMap() {
     setIsCreatingPoster(true);
 
     try {
-      setCreatedPosterUrl(selectedPosterUrl);
-      setCreatedPosterLabel(
-        `${selectedPosterEntry.city}, ${selectedPosterEntry.country} · ${formatPosterThemeLabel(selectedPosterEntry.theme)}`
-      );
+      const dataUrl = await toPng(posterPreviewRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+      });
 
-      const response = await fetch(selectedPosterUrl, { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error('Poster could not be downloaded.');
-      }
+      const label = `${selectedPosterCity}, ${selectedPosterCountry} · ${labelForTheme(selectedThemeId)}`;
+      setCreatedPosterUrl(dataUrl);
+      setCreatedPosterLabel(label);
 
-      const blob = await response.blob();
-      const downloadUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = `${selectedPosterEntry.city.toLowerCase().replace(/\s+/g, '-')}_${selectedPosterEntry.theme}_poster.png`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(downloadUrl), 1500);
+      const anchor = document.createElement('a');
+      const safeCity = selectedPosterCity.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const safeCountry = selectedPosterCountry.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      anchor.href = dataUrl;
+      anchor.download = `${safeCity}_${safeCountry}_${selectedThemeId}_poster.png`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
     } catch {
-      setPosterError('Could not create/download this poster right now. Please try again.');
+      setPosterError('Poster generation failed. Try a different city or try again.');
     } finally {
       setIsCreatingPoster(false);
     }
@@ -528,11 +603,11 @@ export default function CountryQuestMap() {
       </div>
 
       {isPosterPanelOpen && (
-        <aside className="absolute right-4 top-16 z-40 w-[min(92vw,360px)] space-y-3 rounded-2xl border border-white/20 bg-[#0a1019e6] p-4 shadow-[0_20px_45px_rgba(0,0,0,0.45)] backdrop-blur sm:right-6 sm:top-20">
+        <aside className="absolute right-4 top-16 z-40 w-[min(92vw,390px)] space-y-3 rounded-2xl border border-white/20 bg-[#0a1019e6] p-4 shadow-[0_20px_45px_rgba(0,0,0,0.45)] backdrop-blur sm:right-6 sm:top-20">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-[10px] uppercase tracking-[0.24em] text-slate-300">MapToPoster</p>
-              <p className="mt-1 text-sm text-white">Country · City · Theme</p>
+              <p className="mt-1 text-sm text-white">Any country, any city, all themes</p>
             </div>
             <button
               aria-label="Close poster creator"
@@ -550,10 +625,19 @@ export default function CountryQuestMap() {
             </label>
             <select
               className="w-full rounded-lg border border-white/15 bg-black/45 px-3 py-2 text-sm text-white outline-none focus:border-white/40"
+              disabled={isCountriesLoading}
               id="poster-country"
-              onChange={(event) => setSelectedCountry(event.target.value)}
-              value={selectedCountry}
+              onChange={(event) => {
+                setSelectedPosterCountry(event.target.value);
+                setSelectedPosterCity('');
+                setCityQuery('');
+              }}
+              value={selectedPosterCountry}
             >
+              {isCountriesLoading && <option value="">Loading countries...</option>}
+              {!isCountriesLoading && posterCountries.length === 0 && (
+                <option value="">No countries available</option>
+              )}
               {posterCountries.map((country) => (
                 <option key={country} value={country}>
                   {country}
@@ -563,21 +647,42 @@ export default function CountryQuestMap() {
           </div>
 
           <div className="space-y-2">
+            <label className="block text-[11px] uppercase tracking-[0.14em] text-slate-300" htmlFor="poster-city-query">
+              City Search
+            </label>
+            <input
+              className="w-full rounded-lg border border-white/15 bg-black/45 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-400 focus:border-white/40"
+              id="poster-city-query"
+              onChange={(event) => setCityQuery(event.target.value)}
+              placeholder="Type to search cities"
+              value={cityQuery}
+            />
+          </div>
+
+          <div className="space-y-2">
             <label className="block text-[11px] uppercase tracking-[0.14em] text-slate-300" htmlFor="poster-city">
               City
             </label>
             <select
               className="w-full rounded-lg border border-white/15 bg-black/45 px-3 py-2 text-sm text-white outline-none focus:border-white/40"
+              disabled={!selectedPosterCountry || isCitiesLoading}
               id="poster-city"
-              onChange={(event) => setSelectedCity(event.target.value)}
-              value={selectedCity}
+              onChange={(event) => setSelectedPosterCity(event.target.value)}
+              value={selectedPosterCity}
             >
+              {isCitiesLoading && <option value="">Loading cities...</option>}
+              {!isCitiesLoading && posterCities.length === 0 && <option value="">No matches</option>}
               {posterCities.map((city) => (
                 <option key={city} value={city}>
                   {city}
                 </option>
               ))}
             </select>
+            <p className="text-[11px] text-slate-400">
+              {posterCityTotal > posterCities.length
+                ? `Showing ${posterCities.length} of ${posterCityTotal} matches. Refine search for more.`
+                : `${posterCityTotal} cities available`}
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -587,37 +692,90 @@ export default function CountryQuestMap() {
             <select
               className="w-full rounded-lg border border-white/15 bg-black/45 px-3 py-2 text-sm text-white outline-none focus:border-white/40"
               id="poster-theme"
-              onChange={(event) => setSelectedTheme(event.target.value)}
-              value={selectedTheme}
+              onChange={(event) => setSelectedThemeId(event.target.value as PosterThemeId)}
+              value={selectedThemeId}
             >
-              {posterThemes.map((theme) => (
-                <option key={theme} value={theme}>
-                  {formatPosterThemeLabel(theme)}
+              {POSTER_THEME_IDS.map((themeId) => (
+                <option key={themeId} value={themeId}>
+                  {labelForTheme(themeId)}
                 </option>
               ))}
             </select>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-white/15 bg-black/30">
-            {selectedPosterUrl ? (
+          <div
+            className="relative overflow-hidden rounded-xl border border-white/15"
+            ref={posterPreviewRef}
+            style={{
+              aspectRatio: '3 / 4',
+              backgroundColor: selectedPosterTheme.bg,
+            }}
+          >
+            {posterMapUrl ? (
               <Image
-                alt="Poster live preview"
-                className="h-[190px] w-full object-cover"
-                height={1600}
-                src={selectedPosterUrl}
+                alt="Poster preview map"
+                className="object-cover"
+                fill
+                src={posterMapUrl}
+                style={{
+                  filter: 'grayscale(1) contrast(1.24) brightness(1.08)',
+                  mixBlendMode: 'multiply',
+                  opacity: 0.9,
+                }}
                 unoptimized
-                width={1200}
               />
             ) : (
-              <div className="flex h-[190px] items-center justify-center px-4 text-center text-sm text-slate-300">
-                Choose a country, city, and theme to preview.
+              <div className="absolute inset-0 flex items-center justify-center px-5 text-center text-sm text-slate-300">
+                Pick country and city to render map preview.
               </div>
             )}
+
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{
+                background: `linear-gradient(180deg, ${selectedPosterTheme.gradientColor}14 0%, ${selectedPosterTheme.bg}D0 78%, ${selectedPosterTheme.bg} 100%)`,
+              }}
+            />
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{
+                backgroundColor: selectedPosterTheme.roadSecondary,
+                mixBlendMode: 'soft-light',
+                opacity: 0.35,
+              }}
+            />
+
+            <div className="absolute bottom-0 left-0 right-0 px-5 pb-5 pt-12">
+              <p
+                className="text-[10px] tracking-[0.35em]"
+                style={{
+                  color: selectedPosterTheme.text,
+                }}
+              >
+                MEMORY LANE
+              </p>
+              <h3
+                className="mt-2 text-2xl font-semibold leading-tight"
+                style={{
+                  color: selectedPosterTheme.text,
+                }}
+              >
+                {selectedPosterCity || 'City'}
+              </h3>
+              <p
+                className="mt-1 text-sm uppercase tracking-[0.2em]"
+                style={{
+                  color: selectedPosterTheme.text,
+                }}
+              >
+                {selectedPosterCountry || 'Country'}
+              </p>
+            </div>
           </div>
 
           <button
             className="w-full rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-sm text-amber-100 transition hover:bg-amber-300/20 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!selectedPosterEntry || isCreatingPoster}
+            disabled={!posterMapUrl || isCreatingPoster}
             onClick={handleCreatePoster}
             type="button"
           >
@@ -628,11 +786,11 @@ export default function CountryQuestMap() {
 
           {createdPosterUrl && (
             <div className="space-y-2 rounded-xl border border-white/15 bg-black/30 p-3">
-              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-300">Created</p>
+              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-300">Created & downloaded</p>
               <p className="text-xs text-slate-200">{createdPosterLabel}</p>
               <Image
-                alt={createdPosterLabel || 'Created poster'}
-                className="h-[190px] w-full rounded-lg object-cover"
+                alt={createdPosterLabel}
+                className="h-[220px] w-full rounded-lg object-cover"
                 height={1600}
                 src={createdPosterUrl}
                 unoptimized
