@@ -196,6 +196,9 @@ export default function CountryQuestMap() {
 
   const [isCitiesLoading, setIsCitiesLoading] = useState(false);
   const [isCreatingPoster, setIsCreatingPoster] = useState(false);
+  const [isPosterMapReady, setIsPosterMapReady] = useState(false);
+  const [isPosterMapLoading, setIsPosterMapLoading] = useState(false);
+  const [posterMapError, setPosterMapError] = useState<string | null>(null);
   const [posterError, setPosterError] = useState<string | null>(null);
   const [createdPosterUrl, setCreatedPosterUrl] = useState<string | null>(null);
   const [createdPosterLabel, setCreatedPosterLabel] = useState('');
@@ -239,7 +242,6 @@ export default function CountryQuestMap() {
     const params = new URLSearchParams({
       city: selectedPosterCity,
       country: selectedPosterCountry,
-      size: '1100',
       zoom: '12',
     });
 
@@ -343,8 +345,27 @@ export default function CountryQuestMap() {
     setCreatedPosterLabel('');
   }, [selectedPosterCity, selectedPosterCountry, selectedThemeId]);
 
+  useEffect(() => {
+    if (posterMapUrl) {
+      setIsPosterMapLoading(true);
+      setIsPosterMapReady(false);
+      setPosterMapError(null);
+      return;
+    }
+
+    setIsPosterMapLoading(false);
+    setIsPosterMapReady(false);
+    setPosterMapError(null);
+  }, [posterMapUrl]);
+
   const handleCreatePoster = async () => {
-    if (!posterPreviewRef.current || !selectedPosterCountry || !selectedPosterCity) {
+    if (
+      !posterPreviewRef.current ||
+      !selectedPosterCountry ||
+      !selectedPosterCity ||
+      !posterMapUrl ||
+      !isPosterMapReady
+    ) {
       return;
     }
 
@@ -675,7 +696,7 @@ export default function CountryQuestMap() {
 
           <button
             className="w-full rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-sm text-amber-100 transition hover:bg-amber-300/20 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!posterMapUrl || isCreatingPoster}
+            disabled={!posterMapUrl || !isPosterMapReady || isCreatingPoster}
             onClick={handleCreatePoster}
             type="button"
           >
@@ -699,6 +720,16 @@ export default function CountryQuestMap() {
                   alt="Poster preview map"
                   className="object-cover"
                   fill
+                  onError={() => {
+                    setIsPosterMapReady(false);
+                    setIsPosterMapLoading(false);
+                    setPosterMapError('Map preview failed for this location. Try another city.');
+                  }}
+                  onLoad={() => {
+                    setIsPosterMapReady(true);
+                    setIsPosterMapLoading(false);
+                    setPosterMapError(null);
+                  }}
                   src={posterMapUrl}
                   style={{
                     filter: 'grayscale(1) contrast(1.24) brightness(1.08)',
@@ -750,9 +781,16 @@ export default function CountryQuestMap() {
                   {selectedPosterCountry}
                 </p>
               </div>
+
+              {isPosterMapLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/30 text-xs text-slate-200">
+                  Loading map preview...
+                </div>
+              )}
             </div>
           )}
 
+          {posterMapError && <p className="text-xs text-rose-300">{posterMapError}</p>}
           {posterError && <p className="text-xs text-rose-300">{posterError}</p>}
 
           {createdPosterUrl && (

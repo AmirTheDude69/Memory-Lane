@@ -14,14 +14,11 @@ type GeocodeCacheValue = {
 };
 
 const GEOCODE_URL = 'https://nominatim.openstreetmap.org/search';
-const STATIC_MAP_URL = 'https://staticmap.openstreetmap.de/staticmap.php';
+const OSM_TILE_URL = 'https://tile.openstreetmap.org';
 const GEOCODE_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 const geocodeCache = new Map<string, GeocodeCacheValue>();
 
 const DEFAULT_ZOOM = 12;
-const DEFAULT_SIZE = 1000;
-const MIN_SIZE = 300;
-const MAX_SIZE = 1200;
 const MIN_ZOOM = 8;
 const MAX_ZOOM = 16;
 
@@ -93,6 +90,27 @@ const geocodeCity = async (city: string, country: string) => {
   return { lat, lon };
 };
 
+const toTileXY = (latitude: number, longitude: number, zoom: number) => {
+  const safeLat = Math.max(-85.0511, Math.min(85.0511, latitude));
+  const safeLon = ((longitude + 180) % 360 + 360) % 360 - 180;
+  const n = 2 ** zoom;
+  const x = Math.floor(((safeLon + 180) / 360) * n);
+  const y = Math.floor(
+    ((1 -
+      Math.log(
+        Math.tan((safeLat * Math.PI) / 180) + 1 / Math.cos((safeLat * Math.PI) / 180)
+      ) /
+        Math.PI) /
+      2) *
+      n
+  );
+
+  return {
+    x: Math.max(0, Math.min(n - 1, x)),
+    y: Math.max(0, Math.min(n - 1, y)),
+  };
+};
+
 export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
@@ -104,19 +122,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Country and city are required.' }, { status: 400 });
   }
 
-  const size = parseBoundedInt(searchParams.get('size'), DEFAULT_SIZE, MIN_SIZE, MAX_SIZE);
   const zoom = parseBoundedInt(searchParams.get('zoom'), DEFAULT_ZOOM, MIN_ZOOM, MAX_ZOOM);
 
   try {
     const { lat, lon } = await geocodeCity(city, country);
+    const { x, y } = toTileXY(lat, lon, zoom);
+    const tileUrl = `${OSM_TILE_URL}/${zoom}/${x}/${y}.png`;
 
-    const staticMapUrl = new URL(STATIC_MAP_URL);
-    staticMapUrl.searchParams.set('center', `${lat},${lon}`);
-    staticMapUrl.searchParams.set('zoom', String(zoom));
-    staticMapUrl.searchParams.set('size', `${size}x${size}`);
-    staticMapUrl.searchParams.set('maptype', 'mapnik');
-
-    const response = await fetch(staticMapUrl, {
+    const response = await fetch(tileUrl, {
       next: { revalidate: 60 * 60 * 24 },
     });
 
