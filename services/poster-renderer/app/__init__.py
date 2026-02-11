@@ -1,0 +1,2 @@
+"""Poster renderer service package."""
+

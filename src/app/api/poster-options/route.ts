@@ -1,33 +1,25 @@
 import { NextResponse } from 'next/server';
-import worldLow from '@amcharts/amcharts5-geodata/json/worldLow';
 
 import { normalizePosterCountry } from '@/data/maptoposter';
+import citiesByCountry from '@/data/posterCitiesByCountry.json';
+import { POSTER_COUNTRIES } from '@/data/posterCountries';
 
-type CitiesResponse = {
-  data?: string[];
-  error?: boolean;
-};
+type PosterCitiesIndex = Record<string, string[]>;
 
-type CacheValue = {
-  expiresAt: number;
-  value: string[];
-};
-
-const CITIES_URL = 'https://countriesnow.space/api/v0.1/countries/cities/q?country=';
-const CACHE_TTL_MS = 1000 * 60 * 60 * 6;
 const MAX_LIMIT = 500;
 const MIN_LIMIT = 20;
 
-const countriesCache: { current: CacheValue | null } = { current: null };
-const citiesCache = new Map<string, CacheValue>();
+const COUNTRY_NAME_ALIASES: Record<string, string> = {
+  UK: 'United Kingdom',
+  UAE: 'United Arab Emirates',
+  Türkiye: 'Turkey',
+  'Viet Nam': 'Vietnam',
+};
 
 const withUniqueSortedValues = (values: string[]) =>
   Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((left, right) =>
     left.localeCompare(right)
   );
-
-const isFresh = (cache: CacheValue | null) =>
-  Boolean(cache && cache.expiresAt > Date.now() && cache.value.length > 0);
 
 const parseLimit = (value: string | null): number => {
   const parsed = Number.parseInt(value ?? '', 10);
@@ -37,65 +29,28 @@ const parseLimit = (value: string | null): number => {
   return Math.max(MIN_LIMIT, Math.min(MAX_LIMIT, parsed));
 };
 
-const LOCAL_COUNTRIES = withUniqueSortedValues(
-  (
-    worldLow as {
-      features?: Array<{
-        properties?: {
-          name?: string;
-        };
-      }>;
+const getCountryLookupCandidates = (country: string): string[] => {
+  const trimmed = country.trim();
+  const normalized = normalizePosterCountry(trimmed);
+  const aliased = COUNTRY_NAME_ALIASES[trimmed] ?? trimmed;
+  const normalizedAliased = normalizePosterCountry(aliased);
+
+  return withUniqueSortedValues([trimmed, normalized, aliased, normalizedAliased]);
+};
+
+const getCitiesForCountry = (country: string) => {
+  const index = citiesByCountry as PosterCitiesIndex;
+  const candidates = getCountryLookupCandidates(country);
+  for (const candidate of candidates) {
+    const cityList = index[candidate];
+    if (Array.isArray(cityList)) {
+      return withUniqueSortedValues(cityList);
     }
-  ).features?.map((feature) => feature.properties?.name ?? '') ?? []
-);
-
-const getCountries = async () => {
-  if (isFresh(countriesCache.current)) {
-    return countriesCache.current!.value;
   }
-
-  countriesCache.current = {
-    expiresAt: Date.now() + CACHE_TTL_MS,
-    value: LOCAL_COUNTRIES,
-  };
-
-  return LOCAL_COUNTRIES;
+  return [] as string[];
 };
 
-const getCities = async (country: string) => {
-  const normalizedCountry = normalizePosterCountry(country);
-  const cached = citiesCache.get(normalizedCountry);
-
-  if (isFresh(cached ?? null)) {
-    return cached!.value;
-  }
-
-  const abortController = new AbortController();
-  const timeout = setTimeout(() => abortController.abort(), 10_000);
-
-  const response = await fetch(`${CITIES_URL}${encodeURIComponent(normalizedCountry)}`, {
-    next: { revalidate: 60 * 60 * 6 },
-    signal: abortController.signal,
-  }).finally(() => clearTimeout(timeout));
-
-  if (!response.ok) {
-    throw new Error(`Cities fetch failed: ${response.status}`);
-  }
-
-  const payload = (await response.json()) as CitiesResponse;
-  if (payload.error) {
-    throw new Error('Cities API returned error.');
-  }
-
-  const cities = withUniqueSortedValues(payload.data ?? []);
-
-  citiesCache.set(normalizedCountry, {
-    expiresAt: Date.now() + CACHE_TTL_MS,
-    value: cities,
-  });
-
-  return cities;
-};
+const countries = withUniqueSortedValues([...POSTER_COUNTRIES]);
 
 export const runtime = 'nodejs';
 
@@ -106,26 +61,22 @@ export async function GET(request: Request) {
   const limit = parseLimit(searchParams.get('limit'));
 
   if (!country) {
-    const countries = await getCountries();
-    return NextResponse.json({ countries, source: 'local-world' });
-  }
-
-  try {
-    const cities = await getCities(country);
-    const filtered = query
-      ? cities.filter((city) => city.toLowerCase().includes(query))
-      : cities;
-
     return NextResponse.json({
-      cities: filtered.slice(0, limit),
-      query,
-      total: filtered.length,
-    });
-  } catch {
-    return NextResponse.json({
-      cities: [],
-      query,
-      total: 0,
+      countries,
+      source: 'local-index',
     });
   }
+
+  const cities = getCitiesForCountry(country);
+  const filtered = query
+    ? cities.filter((city) => city.toLowerCase().includes(query))
+    : cities;
+
+  return NextResponse.json({
+    cities: filtered.slice(0, limit),
+    query,
+    source: 'local-index',
+    total: filtered.length,
+  });
 }
+
