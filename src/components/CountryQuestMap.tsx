@@ -180,7 +180,7 @@ const labelForTheme = (themeId: PosterThemeId) => POSTER_THEME_BY_ID[themeId].la
 
 export default function CountryQuestMap() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const posterPreviewRef = useRef<HTMLDivElement>(null);
+  const posterExportRef = useRef<HTMLDivElement>(null);
 
   const [activeTripSlug, setActiveTripSlug] = useState<string | null>(null);
   const [countryGroups, setCountryGroups] = useState<CountryGroups>(FALLBACK_COUNTRY_GROUPS);
@@ -198,6 +198,7 @@ export default function CountryQuestMap() {
   const [isCreatingPoster, setIsCreatingPoster] = useState(false);
   const [isPosterMapReady, setIsPosterMapReady] = useState(false);
   const [isPosterMapLoading, setIsPosterMapLoading] = useState(false);
+  const [loadedPosterRenderKey, setLoadedPosterRenderKey] = useState('');
   const [posterMapError, setPosterMapError] = useState<string | null>(null);
   const [posterError, setPosterError] = useState<string | null>(null);
   const [createdPosterUrl, setCreatedPosterUrl] = useState<string | null>(null);
@@ -209,6 +210,13 @@ export default function CountryQuestMap() {
   );
 
   const selectedPosterTheme = POSTER_THEME_BY_ID[selectedThemeId];
+  const posterRenderKey = useMemo(
+    () =>
+      selectedPosterCountry && selectedPosterCity
+        ? `${selectedPosterCountry}::${selectedPosterCity}::${selectedThemeId}`
+        : '',
+    [selectedPosterCity, selectedPosterCountry, selectedThemeId]
+  );
   const cityOptions = useMemo(() => {
     const options = [...posterCities];
     const seen = new Set(options.map((city) => city.toLowerCase()));
@@ -245,8 +253,9 @@ export default function CountryQuestMap() {
       zoom: '12',
     });
 
+    params.set('renderKey', posterRenderKey);
     return `/api/poster-map?${params.toString()}`;
-  }, [selectedPosterCity, selectedPosterCountry]);
+  }, [posterRenderKey, selectedPosterCity, selectedPosterCountry]);
 
   useEffect(() => {
     let cancelled = false;
@@ -349,22 +358,25 @@ export default function CountryQuestMap() {
     if (posterMapUrl) {
       setIsPosterMapLoading(true);
       setIsPosterMapReady(false);
+      setLoadedPosterRenderKey('');
       setPosterMapError(null);
       return;
     }
 
     setIsPosterMapLoading(false);
     setIsPosterMapReady(false);
+    setLoadedPosterRenderKey('');
     setPosterMapError(null);
   }, [posterMapUrl]);
 
   const handleCreatePoster = async () => {
     if (
-      !posterPreviewRef.current ||
+      !posterExportRef.current ||
       !selectedPosterCountry ||
       !selectedPosterCity ||
       !posterMapUrl ||
-      !isPosterMapReady
+      !isPosterMapReady ||
+      loadedPosterRenderKey !== posterRenderKey
     ) {
       return;
     }
@@ -373,9 +385,14 @@ export default function CountryQuestMap() {
     setIsCreatingPoster(true);
 
     try {
-      const dataUrl = await toPng(posterPreviewRef.current, {
+      const dataUrl = await toPng(posterExportRef.current, {
+        backgroundColor: selectedPosterTheme.bg,
         cacheBust: true,
-        pixelRatio: 2,
+        canvasHeight: 1600,
+        canvasWidth: 1200,
+        height: 1600,
+        pixelRatio: 1,
+        width: 1200,
       });
 
       const label = `${selectedPosterCity}, ${selectedPosterCountry} · ${labelForTheme(selectedThemeId)}`;
@@ -696,7 +713,12 @@ export default function CountryQuestMap() {
 
           <button
             className="w-full rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-sm text-amber-100 transition hover:bg-amber-300/20 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!posterMapUrl || !isPosterMapReady || isCreatingPoster}
+            disabled={
+              !posterMapUrl ||
+              !isPosterMapReady ||
+              loadedPosterRenderKey !== posterRenderKey ||
+              isCreatingPoster
+            }
             onClick={handleCreatePoster}
             type="button"
           >
@@ -710,7 +732,6 @@ export default function CountryQuestMap() {
           {selectedPosterCity && (
             <div
               className="relative h-[170px] overflow-hidden rounded-xl border border-white/15"
-              ref={posterPreviewRef}
               style={{
                 backgroundColor: selectedPosterTheme.bg,
               }}
@@ -720,14 +741,17 @@ export default function CountryQuestMap() {
                   alt="Poster preview map"
                   className="object-cover"
                   fill
+                  key={posterRenderKey}
                   onError={() => {
                     setIsPosterMapReady(false);
                     setIsPosterMapLoading(false);
+                    setLoadedPosterRenderKey('');
                     setPosterMapError('Map preview failed for this location. Try another city.');
                   }}
                   onLoad={() => {
                     setIsPosterMapReady(true);
                     setIsPosterMapLoading(false);
+                    setLoadedPosterRenderKey(posterRenderKey);
                     setPosterMapError(null);
                   }}
                   src={posterMapUrl}
@@ -808,6 +832,74 @@ export default function CountryQuestMap() {
             </div>
           )}
         </aside>
+      )}
+
+      {selectedPosterCity && posterMapUrl && (
+        <div className="pointer-events-none fixed -left-[10000px] top-0 opacity-0">
+          <div
+            className="relative h-[1600px] w-[1200px] overflow-hidden"
+            ref={posterExportRef}
+            style={{
+              backgroundColor: selectedPosterTheme.bg,
+            }}
+          >
+            <Image
+              alt="Poster export map"
+              className="object-cover"
+              fill
+              key={`export-${posterRenderKey}`}
+              src={posterMapUrl}
+              style={{
+                filter: 'grayscale(1) contrast(1.24) brightness(1.08)',
+                mixBlendMode: 'multiply',
+                opacity: 0.9,
+              }}
+              unoptimized
+            />
+
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{
+                background: `linear-gradient(180deg, ${selectedPosterTheme.gradientColor}10 0%, ${selectedPosterTheme.bg}CA 74%, ${selectedPosterTheme.bg} 100%)`,
+              }}
+            />
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{
+                backgroundColor: selectedPosterTheme.roadSecondary,
+                mixBlendMode: 'soft-light',
+                opacity: 0.3,
+              }}
+            />
+
+            <div className="absolute bottom-0 left-0 right-0 px-16 pb-20 pt-28">
+              <p
+                className="text-[34px] tracking-[0.3em]"
+                style={{
+                  color: selectedPosterTheme.text,
+                }}
+              >
+                MEMORY LANE
+              </p>
+              <h2
+                className="mt-5 text-[92px] font-semibold leading-[1.02]"
+                style={{
+                  color: selectedPosterTheme.text,
+                }}
+              >
+                {selectedPosterCity}
+              </h2>
+              <p
+                className="mt-3 text-[40px] uppercase tracking-[0.18em]"
+                style={{
+                  color: selectedPosterTheme.text,
+                }}
+              >
+                {selectedPosterCountry}
+              </p>
+            </div>
+          </div>
+        </div>
       )}
 
       {activeTrip && (
